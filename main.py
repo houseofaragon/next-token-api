@@ -1,11 +1,8 @@
-import tiktoken
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import torch
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPTNeoForCausalLM, AutoTokenizer, T5Tokenizer, T5ForConditionalGeneration
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import List
 from fastapi.middleware.cors import CORSMiddleware
-
 
 # Initialize FastAPI
 app = FastAPI()
@@ -19,29 +16,49 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-# Load the GPT-2 tokenizer and model
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT2LMHeadModel.from_pretrained("gpt2")
-model.eval()
-
 # Pydantic model for input data
 class TextInput(BaseModel):
     text: str
+    tokenizer_name: str  # New field to select tokenizer
+
+# Function to dynamically load the selected model and tokenizer
+def load_model_and_tokenizer(tokenizer_name: str):
+    # Load model and tokenizer based on user selection
+    if tokenizer_name == 'gpt2':
+        model = GPT2LMHeadModel.from_pretrained(tokenizer_name)
+        tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_name)
+    elif tokenizer_name == 'distilgpt2':
+        tokenizer = GPT2Tokenizer.from_pretrained("distilgpt2")
+        model = GPT2LMHeadModel.from_pretrained("distilgpt2")
+    elif tokenizer_name == 'EleutherAI/gpt-neo-1.3B':
+        model = GPTNeoForCausalLM.from_pretrained(tokenizer_name)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    elif tokenizer_name == 't5-small':
+        model = T5ForConditionalGeneration.from_pretrained(tokenizer_name)
+        tokenizer = T5Tokenizer.from_pretrained(tokenizer_name)
+    elif tokenizer_name == 'facebook/bart-small':
+        model = BartForConditionalGeneration.from_pretrained(tokenizer_name)
+        tokenizer = BartTokenizer.from_pretrained(tokenizer_name)
+    else:   
+        raise ValueError("Unsupported model name or tokenizer")
+
+    model.eval()
+    return model, tokenizer
 
 # Function to get next token probabilities
-def get_next_token_probabilities(tokens):
+def get_next_token_probabilities(tokens, model, tokenizer):
     input_ids = torch.tensor(tokens).unsqueeze(0)  # Add batch dimension
-    
+
     with torch.no_grad():
         outputs = model(input_ids)
         logits = outputs.logits[:, -1, :]  # Get logits for the last token
 
     probs = torch.nn.functional.softmax(logits, dim=-1)
     top_probabilities, top_indices = torch.topk(probs, 10)
-    
+
     top_tokens = [tokenizer.decode([idx]) for idx in top_indices[0]]
     top_probabilities = top_probabilities[0].tolist()
-    
+
     return top_tokens, top_probabilities
 
 # Define the API endpoint
@@ -49,20 +66,18 @@ def get_next_token_probabilities(tokens):
 async def predict_next_token(input_data: TextInput):
     print(input_data)
     text = input_data.text
-    tokens = tokenizer.encode(text)
-    top_tokens, top_probabilities = get_next_token_probabilities(tokens)
+    tokenizer_name = input_data.tokenizer_name
     
+    # Load the selected model and tokenizer
+    model, tokenizer = load_model_and_tokenizer(tokenizer_name)
+    
+    tokens = tokenizer.encode(text)
+    print(f"Tokens length: {len(tokens)}")
+    top_tokens, top_probabilities = get_next_token_probabilities(tokens, model, tokenizer)
+
     return {
         "top_tokens": top_tokens,
         "top_probabilities": top_probabilities
     }
 
 # Run the API with: uvicorn main:app --reload
-"""
-curl -X 'POST' \
-  'http://127.0.0.1:8000/predict' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "text": "The boy jumped over the"
-}'
-"""
