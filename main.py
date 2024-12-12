@@ -1,4 +1,5 @@
 import torch
+import tiktoken
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, GPTNeoForCausalLM, AutoTokenizer, T5Tokenizer, T5ForConditionalGeneration
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -25,8 +26,8 @@ class TextInput(BaseModel):
 def load_model_and_tokenizer(tokenizer_name: str):
     # Load model and tokenizer based on user selection
     if tokenizer_name == 'gpt2':
-        model = GPT2LMHeadModel.from_pretrained(tokenizer_name)
-        tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_name)
+        model = GPT2LMHeadModel.from_pretrained('gpt2')
+        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     elif tokenizer_name == 'distilgpt2':
         tokenizer = GPT2Tokenizer.from_pretrained("distilgpt2")
         model = GPT2LMHeadModel.from_pretrained("distilgpt2")
@@ -39,6 +40,9 @@ def load_model_and_tokenizer(tokenizer_name: str):
     elif tokenizer_name == 'facebook/bart-small':
         model = BartForConditionalGeneration.from_pretrained(tokenizer_name)
         tokenizer = BartTokenizer.from_pretrained(tokenizer_name)
+    elif tokenizer_name == 'o200k_base':
+        model = GPT2LMHeadModel.from_pretrained('gpt2')
+        tokenizer = tiktoken.get_encoding('o200k_base')
     else:   
         raise ValueError("Unsupported model name or tokenizer")
 
@@ -72,10 +76,13 @@ async def predict_next_token(input_data: TextInput):
     model, tokenizer = load_model_and_tokenizer(tokenizer_name)
     
     tokens = tokenizer.encode(text)
+    print(f"Tokens: {tokens}")
     print(f"Tokens length: {len(tokens)}")
     top_tokens, top_probabilities = get_next_token_probabilities(tokens, model, tokenizer)
-
+    print(model.config.vocab_size)
     return {
+        "model_config": model.config,
+        "tokens": tokens,
         "top_tokens": top_tokens,
         "top_probabilities": top_probabilities
     }
